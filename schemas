@@ -1,0 +1,101 @@
+-- Create customers table
+CREATE TABLE IF NOT EXISTS customers (
+    customer_id BIGINT PRIMARY KEY,
+    customer_name VARCHAR(255) NOT NULL,
+    email VARCHAR(255) UNIQUE,
+    signup_date DATE NOT NULL,
+    country VARCHAR(100),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+ 
+-- Create products table
+CREATE TABLE IF NOT EXISTS products (
+    product_id BIGINT PRIMARY KEY,
+    product_name VARCHAR(255) NOT NULL,
+    category VARCHAR(100),
+    price DECIMAL(10, 2) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+ 
+-- Create transactions table (fact table)
+CREATE TABLE IF NOT EXISTS transactions (
+    transaction_id BIGINT PRIMARY KEY,
+    customer_id BIGINT NOT NULL,
+    product_id BIGINT NOT NULL,
+    transaction_date DATE NOT NULL,
+    quantity INT NOT NULL,
+    unit_price DECIMAL(10, 2) NOT NULL,
+    total_amount DECIMAL(12, 2) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (customer_id) REFERENCES customers(customer_id),
+    FOREIGN KEY (product_id) REFERENCES products(product_id)
+);
+ 
+-- Create indexes for performance
+CREATE INDEX IF NOT EXISTS idx_transactions_customer_id ON transactions(customer_id);
+CREATE INDEX IF NOT EXISTS idx_transactions_product_id ON transactions(product_id);
+CREATE INDEX IF NOT EXISTS idx_transactions_transaction_date ON transactions(transaction_date);
+CREATE INDEX IF NOT EXISTS idx_customers_signup_date ON customers(signup_date);
+CREATE INDEX IF NOT EXISTS idx_products_category ON products(category);
+ 
+-- ============================================================================
+-- ANALYTICAL TABLES (for aggregated data)
+-- ============================================================================
+ 
+-- Customer Metrics (Updated daily or on-demand)
+CREATE TABLE IF NOT EXISTS customer_metrics (
+    customer_id BIGINT PRIMARY KEY REFERENCES customers(customer_id),
+    recency_days INT,                    -- Days since last purchase
+    frequency INT,                        -- Total purchases
+    monetary DECIMAL(12, 2),              -- Total spent
+    ltv DECIMAL(12, 2),                   -- Lifetime value (simplified = total spent)
+    avg_order_value DECIMAL(10, 2),       -- Average transaction value
+    repeat_purchase_rate DECIMAL(5, 2),   -- % of purchases that are repeats
+    churn_risk_score DECIMAL(5, 2),      -- 0-100 churn probability
+    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+ 
+-- Monthly Summary
+CREATE TABLE IF NOT EXISTS monthly_summary (
+    summary_id SERIAL PRIMARY KEY,
+    month DATE NOT NULL UNIQUE,
+    total_revenue DECIMAL(15, 2),
+    total_transactions INT,
+    total_customers INT,
+    new_customers INT,
+    returning_customers INT,
+    avg_order_value DECIMAL(10, 2),
+    retention_rate DECIMAL(5, 2),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+ 
+-- ============================================================================
+-- VIEW: Cohort Analysis Base
+-- ============================================================================
+-- This view helps with cohort analysis
+-- Shows each customer's cohort month and transaction month
+ 
+CREATE OR REPLACE VIEW cohort_base AS
+WITH first_purchase AS (
+    SELECT 
+        customer_id,
+        DATE_TRUNC('month', MIN(transaction_date))::DATE AS cohort_month
+    FROM transactions
+    GROUP BY customer_id
+)
+SELECT 
+    c.customer_id,
+    c.cohort_month,
+    DATE_TRUNC('month', t.transaction_date)::DATE AS transaction_month,
+    FLOOR((DATE_PART('year', t.transaction_date) - DATE_PART('year', c.cohort_month)) * 12 + 
+          DATE_PART('month', t.transaction_date) - DATE_PART('month', c.cohort_month))::INT AS months_since_signup,
+    COUNT(DISTINCT t.transaction_id) AS transactions_count,
+    SUM(t.total_amount) AS revenue
+FROM first_purchase c
+LEFT JOIN transactions t ON c.customer_id = t.customer_id
+GROUP BY c.customer_id, c.cohort_month, transaction_month;
+
+
+just for info real project is yet to upload think of this as an context window
